@@ -1,7 +1,37 @@
 const router = require('express').Router();
+const bcryptjs = require('bcryptjs');
+const jwt = require('jsonwebtoken')
+const { jwtSecret } = require('../../config/secrets');
 
-router.post('/register', (req, res) => {
-  res.end('implement register, please!');
+const User = require('./../users/user-model');
+const Mid = require('./../middleware/users-middleware')
+
+// middlewares
+
+function isValid(user) {
+  return Boolean(user.username && user.password && typeof user.password === 'string');
+}
+
+router.post('/register', Mid.checkPayload, Mid.checkUsernameUnique, (req, res) => {
+  const credentials = req.body;
+
+  if(isValid(credentials)) {
+    const rounds = process.env.BCRYPT_ROUNDS || 7;
+    const hash = bcryptjs.hashSync(credentials.password, rounds);
+    credentials.password = hash;
+
+    User.add(credentials)
+      .then(user => {
+        res.status(201).json(user);
+      })
+      .catch(error => {
+        res.status(500).json({ message: error.message });
+      });
+  } else {
+    res.status(400).json({
+      message: "username and password required",
+    });
+  }
   /*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
@@ -28,9 +58,26 @@ router.post('/register', (req, res) => {
   */
 });
 
-
-router.post('/login', (req, res) => {
-  res.end('implement login, please!');
+router.post('/login', Mid.checkPayload, (req, res) => {
+  const { username, password } = req.body;
+  if(isValid(req.body)) {
+    User.findBy({ username: username })
+      .then(([user]) => {
+        if(user && bcryptjs.compareSync(password, user.password)) {
+          const token = makeToken(user);
+          res.status(200).json({
+            message: `welcome, ${user.username}`, token,
+          })
+        } else {
+          res.status(401).json({ message: 'invalid credentials' })
+        }
+      })
+      .catch(e => {
+        res.status(500).json({ message: e.message });
+      })
+  } else {
+    res.status(400).json({ message: 'invalid credentials' })
+  }
   /*
     IMPLEMENT
     You are welcome to build additional middlewares to help with the endpoint's functionality.
@@ -55,5 +102,17 @@ router.post('/login', (req, res) => {
       the response body should include a string exactly as follows: "invalid credentials".
   */
 });
+
+function makeToken(user) {
+  const payload = {
+    id: user.id,
+    username: user.username,
+    department: user.department
+  }
+  const options = {
+    expiresIn: '1000s'
+  }
+  return jwt.sign(payload, jwtSecret, options)
+}
 
 module.exports = router;
